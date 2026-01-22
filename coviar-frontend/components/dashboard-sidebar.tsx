@@ -2,9 +2,10 @@
 
 import { Home, ClipboardList, History, Settings, LogOut } from "lucide-react"
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/lib/auth/hooks"
 
 const navigation = [
   { name: "Inicio", href: "/dashboard", icon: Home },
@@ -16,15 +17,7 @@ const bottomNavigation = [{ name: "Configuración", href: "/dashboard/configurac
 
 export function DashboardSidebar() {
   const pathname = usePathname()
-  const router = useRouter()
-
-  const handleLogout = () => {
-    // Limpiar localStorage
-    localStorage.removeItem('usuario')
-    
-    // Redirigir a login
-    router.push("/login")
-  }
+  const { handleLogout, isLoading } = useAuth()
 
   return (
     <div className="flex h-full w-64 flex-col bg-sidebar border-r border-sidebar-border">
@@ -74,11 +67,12 @@ export function DashboardSidebar() {
         })}
         <Button
           onClick={handleLogout}
+          disabled={isLoading}
           variant="ghost"
           className="w-full justify-start gap-3 px-3 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         >
           <LogOut className="h-5 w-5" />
-          Cerrar Sesión
+          {isLoading ? "Cerrando sesión..." : "Cerrar Sesión"}
         </Button>
       </div>
     </div>

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/carli/coviar-backend/internal/auth"
 	"github.com/carli/coviar-backend/internal/bodega"
 	"github.com/carli/coviar-backend/internal/config"
 	"github.com/carli/coviar-backend/internal/platform/database"
@@ -88,12 +89,13 @@ func main() {
 		if r.Method == http.MethodGet {
 			usuarioHandler.ListAll(w, r)
 		} else if r.Method == http.MethodPost {
-			usuarioHandler.Create(w, r)
+			usuarioHandler.Register(w, r)
 		} else {
 			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
 		}
 	})
 	mux.HandleFunc("/api/usuarios/verificar", usuarioHandler.Verify)
+	mux.Handle("/api/usuarios/me", auth.AuthMiddleware(http.HandlerFunc(usuarioHandler.GetCurrentUser)))
 	mux.HandleFunc("/api/usuarios/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			usuarioHandler.GetByID(w, r)
@@ -103,6 +105,11 @@ func main() {
 			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
 		}
 	})
+
+	// Rutas de Autenticación con JWT y Cookies
+	mux.HandleFunc("/api/auth/register", usuarioHandler.Register)
+	mux.HandleFunc("/api/auth/login", usuarioHandler.Login)
+	mux.HandleFunc("/api/auth/logout", usuarioHandler.Logout)
 
 	// 5. Aplicar middleware CORS
 	handler := corsMiddleware(mux)
@@ -120,14 +127,19 @@ func main() {
 	fmt.Println("   GENERAL:")
 	fmt.Println("   GET    /health                      - Estado del servidor")
 	fmt.Println()
+	fmt.Println("   AUTENTICACIÓN (JWT + Cookies):")
+	fmt.Println("   POST   /api/auth/register           - Registrar nuevo usuario")
+	fmt.Println("   POST   /api/auth/login              - Iniciar sesión")
+	fmt.Println("   POST   /api/auth/logout             - Cerrar sesión")
+	fmt.Println()
 	fmt.Println("   BODEGAS:")
 	fmt.Println("   GET    /api/bodegas                 - Listar bodegas")
 	fmt.Println("   GET    /api/bodegas/{id}            - Obtener bodega por ID")
 	fmt.Println("   POST   /api/bodegas                 - Crear bodega")
 	fmt.Println()
-	fmt.Println("   USUARIOS:")
-	fmt.Println("   POST   /api/usuarios                - Crear usuario")
-	fmt.Println("   POST   /api/usuarios/verificar      - Verificar credenciales (login)")
+	fmt.Println("   USUARIOS (LEGACY):")
+	fmt.Println("   POST   /api/usuarios                - Crear usuario (usar /api/auth/register)")
+	fmt.Println("   POST   /api/usuarios/verificar      - Verificar credenciales (usar /api/auth/login)")
 	fmt.Println("   GET    /api/usuarios                - Listar usuarios")
 	fmt.Println("   GET    /api/usuarios/{id}           - Obtener usuario por ID")
 	fmt.Println("   DELETE /api/usuarios/{id}           - Dar de baja usuario")

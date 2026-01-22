@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/carli/coviar-backend/internal/auth"
 	"github.com/carli/coviar-backend/internal/domain"
 )
 
@@ -22,8 +23,8 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// Create maneja POST /api/usuarios - Guardar datos del usuario
-func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+// Register maneja POST /api/auth/register - Registrar nuevo usuario
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	if r.Method != http.MethodPost {
@@ -39,8 +40,145 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	usuario, err := h.service.Create(&dto)
 	if err != nil {
-		log.Printf("Error al crear usuario: %v", err)
+		log.Printf("Error al registrar usuario: %v", err)
 		sendError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Generar tokens JWT
+	accessToken, err := auth.GenerateToken(usuario.IdUsuario, usuario.Email, usuario.Rol, 24)
+	if err != nil {
+		log.Printf("Error al generar access token: %v", err)
+		sendError(w, "Error al generar tokens", http.StatusInternalServerError)
+		return
+	}
+
+	refreshToken, err := auth.GenerateToken(usuario.IdUsuario, usuario.Email, usuario.Rol, 168) // 7 días
+	if err != nil {
+		log.Printf("Error al generar refresh token: %v", err)
+		sendError(w, "Error al generar tokens", http.StatusInternalServerError)
+		return
+	}
+
+	// Establecer cookies
+	auth.SetTokenCookie(w, accessToken, 24)
+	auth.SetRefreshTokenCookie(w, refreshToken, 168)
+
+	w.WriteHeader(http.StatusCreated)
+	sendSuccess(w, map[string]interface{}{
+		"usuario": usuario.ToPublic(),
+		"message": "Usuario registrado exitosamente",
+	})
+}
+
+// Login maneja POST /api/auth/login - Verificar credenciales del usuario
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		sendError(w, "Método no permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var login domain.UsuarioLogin
+	if err := json.NewDecoder(r.Body).Decode(&login); err != nil {
+		sendError(w, "Datos inválidos", http.StatusBadRequest)
+		return
+	}
+
+	usuario, err := h.service.Verify(&login)
+	if err != nil {
+		log.Printf("Error en login: %v", err)
+		sendError(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	// Generar tokens JWT
+	accessToken, err := auth.GenerateToken(usuario.IdUsuario, usuario.Email, usuario.Rol, 24)
+	if err != nil {
+		log.Printf("Error al generar access token: %v", err)
+		sendError(w, "Error al generar tokens", http.StatusInternalServerError)
+		return
+	}
+
+	refreshToken, err := auth.GenerateToken(usuario.IdUsuario, usuario.Email, usuario.Rol, 168) // 7 días
+	if err != nil {
+		log.Printf("Error al generar refresh token: %v", err)
+		sendError(w, "Error al generar tokens", http.StatusInternalServerError)
+		return
+	}
+
+	// Establecer cookies
+	auth.SetTokenCookie(w, accessToken, 24)
+	auth.SetRefreshTokenCookie(w, refreshToken, 168)
+
+	sendSuccess(w, map[string]interface{}{
+		"usuario": usuario.ToPublic(),
+		"message": "Login exitoso",
+	})
+}
+
+// Logout maneja POST /api/auth/logout - Cerrar sesión
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		sendError(w, "Método no permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	log.Println("=== LOGOUT LLAMADO ===")
+
+	// Crear tokens expirados (MaxAge = 0 significa expiración inmediata)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "auth_token",
+		Value:    "expired",
+		Path:     "/",
+		MaxAge:   0, // Expiración inmediata
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "expired",
+		Path:     "/",
+		MaxAge:   0, // Expiración inmediata
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	log.Println("✅ Cookies expiradas")
+
+	w.WriteHeader(http.StatusOK)
+	sendSuccess(w, map[string]string{
+		"message": "Sesión cerrada correctamente",
+	})
+}
+
+// GetCurrentUser maneja GET /api/usuarios/me - Obtener usuario autenticado actual
+func (h *Handler) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		sendError(w, "Método no permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Obtener claims del contexto (del middleware de autenticación)
+	claims, ok := r.Context().Value("claims").(*auth.Claims)
+	if !ok || claims == nil {
+		sendError(w, "No autorizado", http.StatusUnauthorized)
+		return
+	}
+
+	// Obtener usuario por ID desde claims
+	usuario, err := h.service.GetByID(claims.IdUsuario)
+	if err != nil {
+		log.Printf("Error al obtener usuario actual: %v", err)
+		sendError(w, "Usuario no encontrado", http.StatusNotFound)
 		return
 	}
 
@@ -48,7 +186,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	sendSuccess(w, usuario.ToPublic())
 }
 
-// Verify maneja POST /api/usuarios/verificar - Verificar datos del usuario
+// Verify maneja POST /api/usuarios/verificar - Verificar datos del usuario (DEPRECATED)
 func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -97,6 +235,9 @@ func (h *Handler) Deactivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limpiar cookies al desactivar
+	auth.ClearTokenCookies(w)
+
 	sendSuccess(w, map[string]string{"message": "Usuario desactivado correctamente"})
 }
 
@@ -111,7 +252,7 @@ func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	// Extraer ID de la URL
 	path := strings.TrimPrefix(r.URL.Path, "/api/usuarios/")
-	
+
 	// Si la ruta es "verificar", no es un ID
 	if path == "verificar" {
 		sendError(w, "Ruta no válida", http.StatusBadRequest)
