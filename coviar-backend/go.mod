@@ -2,13 +2,14 @@
 // REEMPLAZA EL ARCHIVO ANTERIOR
 module github.com/carli/coviar-backend
 
-go 1.21.1
+go 1.24.0
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/joho/godotenv v1.5.1
+	github.com/lib/pq v1.10.9
 	github.com/supabase-community/supabase-go v0.0.4
-	golang.org/x/crypto v0.30.0
+	golang.org/x/crypto v0.47.0
 )
 
 require (

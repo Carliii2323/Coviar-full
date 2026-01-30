@@ -1,18 +1,28 @@
 // RUTA: coviar-backend/cmd/api/main.go
 // REEMPLAZA EL ARCHIVO main.go EXISTENTE CON ESTE
+// RUTA: coviar-backend/cmd/api/main.go
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/carli/coviar-backend/internal/auth"
 	"github.com/carli/coviar-backend/internal/bodega"
 	"github.com/carli/coviar-backend/internal/config"
 	"github.com/carli/coviar-backend/internal/platform/database"
 	"github.com/carli/coviar-backend/internal/usuario"
+
+	//godotenv para leer lo del .env soluciona error
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
+
+// Variable global para la conexión PostgreSQL
+var postgresDB *sql.DB
 
 // Middleware CORS para permitir peticiones desde el frontend
 func corsMiddleware(next http.Handler) http.Handler {
@@ -41,19 +51,67 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// Inicializar conexión PostgreSQL para recuperación de contraseñas
+func initPostgresDB() *sql.DB {
+	host := os.Getenv("DB_HOST")
+	port := os.Getenv("DB_PORT")
+	user := os.Getenv("DB_USER")
+	password := os.Getenv("DB_PASSWORD")
+	dbname := os.Getenv("DB_NAME")
+
+	if host == "" || password == "" {
+		log.Println("⚠️  Advertencia: Credenciales PostgreSQL no configuradas. Recuperación de contraseña deshabilitada.")
+		return nil
+	}
+
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=require",
+		host, port, user, password, dbname)
+
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		log.Printf("⚠️  Error al conectar PostgreSQL: %v", err)
+		return nil
+	}
+
+	if err = db.Ping(); err != nil {
+		log.Printf("⚠️  No se pudo hacer ping a PostgreSQL: %v", err)
+		return nil
+	}
+
+	fmt.Println("✅ PostgreSQL conectado para recuperación de contraseñas")
+	return db
+}
+
 func main() {
+
+	// 0. Cargar variables de entorno del archivo .env
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("⚠️  No se encontró archivo .env, usando variables de entorno del sistema")
+	} else {
+		log.Println("✅ Archivo .env cargado correctamente")
+	}
+
 	// 1. Cargar configuración
 	cfg := config.Load()
 	fmt.Println("🔧 Configuración cargada")
 
-	// 2. Conectar a base de datos
+	// 2. Conectar a base de datos Supabase (tu conexión existente)
 	db, err := database.Connect(cfg.SupabaseURL, cfg.SupabaseKey)
 	if err != nil {
 		log.Fatal("❌ Error al conectar con Supabase:", err)
 	}
 	fmt.Println("✅ Conectado a Supabase")
 
-	// 3. Inicializar módulos
+	// 3. Conectar a PostgreSQL directamente para recuperación de contraseñas
+	postgresDB = initPostgresDB()
+	if postgresDB != nil {
+		defer postgresDB.Close()
+		// Iniciar limpieza automática de tokens expirados
+		go cleanExpiredTokens(postgresDB)
+	}
+
+	// 4. Inicializar módulos
 
 	// Módulo Bodega
 	bodegaRepo := bodega.NewRepository(db)
@@ -65,7 +123,7 @@ func main() {
 	usuarioService := usuario.NewService(usuarioRepo)
 	usuarioHandler := usuario.NewHandler(usuarioService)
 
-	// 4. Configurar rutas
+	// 5. Configurar rutas
 	mux := http.NewServeMux()
 
 	// Rutas generales
@@ -111,10 +169,18 @@ func main() {
 	mux.HandleFunc("/api/auth/login", usuarioHandler.Login)
 	mux.HandleFunc("/api/auth/logout", usuarioHandler.Logout)
 
-	// 5. Aplicar middleware CORS
+	// Rutas de Recuperación de contraseñas
+	if postgresDB != nil {
+		mux.HandleFunc("/api/request-password-reset", RequestPasswordReset(postgresDB))
+		mux.HandleFunc("/api/reset-password", ResetPassword(postgresDB))
+	} else {
+		fmt.Println("⚠️  Rutas de recuperación de contraseña deshabilitadas (PostgreSQL no conectado)")
+	}
+
+	// 6. Aplicar middleware CORS
 	handler := corsMiddleware(mux)
 
-	// 6. Iniciar servidor
+	// 7. Iniciar servidor
 	port := cfg.Port
 	if port == "" {
 		port = "8080"
@@ -131,6 +197,8 @@ func main() {
 	fmt.Println("   POST   /api/auth/register           - Registrar nuevo usuario")
 	fmt.Println("   POST   /api/auth/login              - Iniciar sesión")
 	fmt.Println("   POST   /api/auth/logout             - Cerrar sesión")
+	fmt.Println("   POST   /api/request-password-reset  - Solicitar recuperación de contraseña")
+	fmt.Println("   POST   /api/reset-password          - Restablecer contraseña")
 	fmt.Println()
 	fmt.Println("   BODEGAS:")
 	fmt.Println("   GET    /api/bodegas                 - Listar bodegas")
