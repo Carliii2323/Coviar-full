@@ -1,14 +1,11 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import Link from "next/link"
 
 export default function RecuperarContrasenaPage() {
   const [email, setEmail] = useState("")
@@ -22,18 +19,40 @@ export default function RecuperarContrasenaPage() {
     setError(null)
     setMessage(null)
 
-    const supabase = createClient()
+    console.log('🔄 Enviando solicitud de recuperación...')
+    console.log('📧 Email:', email)
+    console.log('🌐 API URL:', process.env.NEXT_PUBLIC_API_URL)
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/actualizar-contrasena`,
+      const url = `${process.env.NEXT_PUBLIC_API_URL}/api/request-password-reset`
+      console.log('📍 URL completa:', url)
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
       })
 
-      if (error) throw error
+      console.log('📡 Response status:', response.status)
+      
+      const data = await response.json()
+      console.log('📦 Response data:', data)
 
-      setMessage("Se ha enviado un correo con instrucciones para recuperar tu contraseña")
+      if (!response.ok) {
+        throw new Error(data.message || 'Error al procesar la solicitud')
+      }
+
+      if (data.success) {
+        setMessage(data.message || "Se ha enviado un correo con instrucciones para recuperar tu contraseña")
+        setEmail("")
+      } else {
+        setError(data.message || "Ocurrió un error al procesar tu solicitud")
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Ocurrió un error")
+      console.error('❌ Error:', err)
+      setError(err instanceof Error ? err.message : "Error al conectar con el servidor")
     } finally {
       setIsLoading(false)
     }
@@ -71,9 +90,9 @@ export default function RecuperarContrasenaPage() {
             </Button>
 
             <div className="text-center text-sm">
-              <Link href="/login" className="text-primary hover:underline">
+              <a href="/login" className="text-primary hover:underline">
                 Volver a Iniciar Sesión
-              </Link>
+              </a>
             </div>
           </form>
         </CardContent>
